@@ -4,13 +4,14 @@
   "description": "Github Action: 上传 SSL 证书到七牛云 CDN",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+  "build": "ncc build src/index.ts -o dist",
     "test": "pnpm run build && node test/test.js"
   },
   "author": "zhullyb",
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@vercel/ncc": "^0.38.4",
     "typescript": "^5.0.0"
   },
   "dependencies": {
