@@ -27175,35 +27175,76 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-const qiniu_1 = __nccwpck_require__(4232);
+exports.uploadCertificate = void 0;
+exports.run = run;
+var qiniu_1 = __nccwpck_require__(4232);
+Object.defineProperty(exports, "uploadCertificate", ({ enumerable: true, get: function () { return qiniu_1.uploadCertificate; } }));
+const qiniu_2 = __nccwpck_require__(4232);
 const fs_1 = __importDefault(__nccwpck_require__(9896));
+/**
+ * 读取文件内容（如果文件存在）
+ * @param filePath - 文件路径
+ * @returns 文件内容，如果文件不存在则返回空字符串
+ */
+function readFileContentIfExists(filePath) {
+    if (filePath && fs_1.default.existsSync(filePath) && fs_1.default.statSync(filePath).isFile()) {
+        return fs_1.default.readFileSync(filePath, 'utf8');
+    }
+    return '';
+}
+/**
+ * GitHub Action 主入口函数
+ * 从环境变量中读取配置，上传证书到七牛云
+ */
 async function run() {
+    // 从环境变量获取配置参数
     const accessKey = process.env.INPUT_ACCESS_KEY || '';
     const secretKey = process.env.INPUT_SECRET_KEY || '';
-    let cert = process.env.INPUT_CERT || '';
-    let key = process.env.INPUT_KEY || '';
+    const certPath = process.env.INPUT_CERT || '';
+    const keyPath = process.env.INPUT_KEY || '';
+    const cert = readFileContentIfExists(certPath);
+    const key = readFileContentIfExists(keyPath);
     const certName = process.env.INPUT_CERT_NAME || '';
-    // 如果 cert/key 是文件路径，则读取内容
-    if (cert && fs_1.default.existsSync(cert) && fs_1.default.statSync(cert).isFile()) {
-        cert = fs_1.default.readFileSync(cert, 'utf8');
-    }
-    if (key && fs_1.default.existsSync(key) && fs_1.default.statSync(key).isFile()) {
-        key = fs_1.default.readFileSync(key, 'utf8');
-    }
+    const deployToCDN = process.env.INPUT_DEPLOY_TO_CDN !== 'false';
+    const certDomain = process.env.INPUT_CERT_DOMAIN || '';
+    // 验证必需参数
     if (!accessKey || !secretKey || !cert || !key || !certName) {
-        console.error('参数缺失');
+        console.error('[Error] 参数缺失: 请提供 access_key, secret_key, cert, key 和 cert_name');
+        process.exit(1);
+    }
+    if (deployToCDN && !certDomain) {
+        console.error('[Error] 自动部署到 CDN 需指定 cert_domain 参数');
         process.exit(1);
     }
     try {
-        const result = await (0, qiniu_1.uploadCertificate)({ accessKey, secretKey, cert, key, certName });
-        console.log('上传成功:', result);
+        const result = await (0, qiniu_2.uploadCertificate)({
+            accessKey,
+            secretKey,
+            cert,
+            key,
+            certName,
+            deployToCDN,
+            certDomain
+        });
+        console.log('[Success] 证书上传成功:', result);
+        if (deployToCDN) {
+            if (result.cdnDeploy) {
+                console.log('[Success] CDN 证书部署成功:', result.cdnDeploy);
+            }
+            else {
+                console.warn('[Warning] 未返回 CDN 部署结果');
+            }
+        }
     }
     catch (err) {
-        console.error('上传失败:', err);
+        console.error('[Error] 证书上传失败:', err instanceof Error ? err.message : err);
         process.exit(1);
     }
 }
-run();
+// 当直接运行此文件时执行 run 函数
+if (require.main === require.cache[eval('__filename')]) {
+    run();
+}
 
 
 /***/ }),
@@ -27253,36 +27294,169 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.uploadCertificate = uploadCertificate;
 const qiniu = __importStar(__nccwpck_require__(1703));
 const axios_1 = __importDefault(__nccwpck_require__(9204));
+const utils_1 = __nccwpck_require__(6087);
+/** 七牛云证书管理 API 地址 */
 const QINIU_API = 'https://api.qiniu.com/sslcert';
+/**
+ * 上传证书到七牛云
+ * @param params - 上传参数
+ * @returns 上传结果，包含证书 ID 和 CDN 部署结果（如果启用）
+ * @throws 当上传失败或 API 返回错误时抛出异常
+ */
 async function uploadCertificate(params) {
-    const { accessKey, secretKey, cert, key, certName } = params;
+    const { accessKey, secretKey, cert, key, certName, deployToCDN = true, certDomain } = params;
+    // 创建七牛云认证对象
     const mac = new qiniu.auth.digest.Mac(accessKey, secretKey);
+    // 构造请求体
     const body = {
         name: certName,
         common_name: certName,
         pri: key,
         ca: cert
     };
-    const url = QINIU_API;
     const method = 'POST';
     const contentType = 'application/json';
-    const accessToken = qiniu.util.generateAccessTokenV2(mac, url, method, contentType, JSON.stringify(body));
+    const accessToken = qiniu.util.generateAccessTokenV2(mac, QINIU_API, method, contentType, JSON.stringify(body));
     try {
-        const resp = await axios_1.default.post(url, body, {
+        console.log('[Qiniu] 开始上传证书到七牛云');
+        const resp = await axios_1.default.post(QINIU_API, body, {
             headers: {
                 'Content-Type': contentType,
                 'Authorization': accessToken
             }
         });
-        return resp.data;
+        const result = resp.data;
+        console.log('[Qiniu] 证书上传结果:', result);
+        // 自动部署到 CDN
+        if (deployToCDN && result.certID && certDomain) {
+            console.log(`[Qiniu] 自动部署证书到 CDN 域名: ${certDomain}`);
+            result.cdnDeploy = await (0, utils_1.deployCertToCDN)(mac, result.certID, certDomain);
+            console.log('[Qiniu] CDN 部署结果:', result.cdnDeploy);
+        }
+        return result;
     }
     catch (err) {
-        if (err.response) {
-            throw new Error(`Qiniu API Error: ${err.response.status} ${JSON.stringify(err.response.data)}`);
+        // 详细的错误处理
+        console.error('[Qiniu] 证书上传或部署失败:', err);
+        if (axios_1.default.isAxiosError(err)) {
+            const axiosError = err;
+            if (axiosError.response) {
+                throw new Error(`七牛云 API 错误: HTTP ${axiosError.response.status} - ${JSON.stringify(axiosError.response.data)}`);
+            }
+            throw new Error(`网络请求失败: ${axiosError.message}`);
         }
-        else {
-            throw new Error(`Network Error: ${err.message}`);
+        throw new Error(`未知错误: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
+
+
+/***/ }),
+
+/***/ 6087:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.generateQiniuHeaders = generateQiniuHeaders;
+exports.deployCertToCDN = deployCertToCDN;
+const qiniu = __importStar(__nccwpck_require__(1703));
+const axios_1 = __importDefault(__nccwpck_require__(9204));
+/**
+ * 构造七牛云 API 请求头
+ * @param mac - 七牛云认证对象
+ * @param url - API 地址
+ * @param method - HTTP 方法
+ * @param contentType - Content-Type
+ * @param body - 请求体 (可选)
+ * @returns 包含认证信息的请求头
+ */
+function generateQiniuHeaders(mac, url, method, contentType, body = '') {
+    const accessToken = qiniu.util.generateAccessTokenV2(mac, url, method, contentType, body);
+    return {
+        Authorization: accessToken,
+        'Content-Type': contentType,
+    };
+}
+/**
+ * 部署证书到七牛云 CDN 域名
+ * @param mac - 七牛云认证对象
+ * @param certId - 证书 ID
+ * @param domain - CDN 域名
+ * @returns CDN 部署结果
+ * @throws 当 API 请求失败时抛出异常
+ */
+async function deployCertToCDN(mac, certId, domain) {
+    try {
+        // 1. 获取当前域名的 HTTPS 配置
+        const getDomainUrl = `https://api.qiniu.com/domain/${domain}`;
+        console.log(`[Qiniu] 获取域名 HTTPS 配置: ${getDomainUrl}`);
+        const getResp = await axios_1.default.get(getDomainUrl, {
+            headers: generateQiniuHeaders(mac, getDomainUrl, 'GET', 'application/json'),
+        });
+        const currentHttpsConfig = getResp.data.https || {};
+        const { forceHttps = false, http2Enable = true } = currentHttpsConfig;
+        console.log(currentHttpsConfig);
+        // 2. 更新域名证书配置
+        const updateCertUrl = `${getDomainUrl}/httpsconf`;
+        const requestBody = { certId, forceHttps, http2Enable };
+        console.log(`[Qiniu] 更新域名证书: ${updateCertUrl}`);
+        const putResp = await axios_1.default.put(updateCertUrl, requestBody, {
+            headers: generateQiniuHeaders(mac, updateCertUrl, 'PUT', 'application/json', JSON.stringify(requestBody)),
+        });
+        // 3. 获取更新后的 HTTPS 配置进行验证
+        const verifyResp = await axios_1.default.get(getDomainUrl, {
+            headers: generateQiniuHeaders(mac, getDomainUrl, 'GET', 'application/json'),
+        });
+        console.log('[Qiniu] 更新后域名 HTTPS 配置:', verifyResp.data.https);
+        return putResp.data;
+    }
+    catch (err) {
+        console.error('[Qiniu] CDN 证书部署失败:', err);
+        if (axios_1.default.isAxiosError(err)) {
+            const axiosError = err;
+            if (axiosError.response) {
+                throw new Error(`七牛云 CDN API 错误: HTTP ${axiosError.response.status} - ${JSON.stringify(axiosError.response.data)}`);
+            }
+            throw new Error(`网络请求失败: ${axiosError.message}`);
         }
+        throw new Error(`未知错误: ${err instanceof Error ? err.message : String(err)}`);
     }
 }
 

@@ -1,5 +1,10 @@
 name: 'Deploy Certificate to Qiniu'
-description: '上传 SSL 证书到七牛云 CDN'
+description: '自动上传 SSL 证书到七牛云并部署到 CDN'
+author: 'zhullyb'
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
 inputs:
   access_key:
     description: '七牛云 Access Key'
@@ -8,14 +13,22 @@ inputs:
     description: '七牛云 Secret Key'
     required: true
   cert:
-    description: 'SSL 证书内容（PEM）'
+    description: 'SSL 证书内容（PEM 格式）或文件路径'
     required: true
   key:
-    description: 'SSL 证书私钥内容（PEM）'
+    description: 'SSL 证书私钥内容（PEM 格式）或文件路径'
     required: true
   cert_name:
-    description: '证书名称'
+    description: '证书名称（用于七牛云证书管理）'
     required: true
+  cert_domain:
+    description: 'CDN 域名，用于自动部署证书（当 deploy_to_cdn 为 true 时必填）'
+    required: false
+  deploy_to_cdn:
+    description: '是否自动部署证书到 CDN（默认: true）'
+    required: false
+    default: 'true'
+
 runs:
-  using: 'node12'
+  using: 'node20'
   main: 'dist/index.js'
