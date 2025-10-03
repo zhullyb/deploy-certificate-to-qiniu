@@ -1,0 +1,21 @@
+name: 'Deploy Certificate to Qiniu'
+description: '上传 SSL 证书到七牛云 CDN'
+inputs:
+  access_key:
+    description: '七牛云 Access Key'
+    required: true
+  secret_key:
+    description: '七牛云 Secret Key'
+    required: true
+  cert:
+    description: 'SSL 证书内容（PEM）'
+    required: true
+  key:
+    description: 'SSL 证书私钥内容（PEM）'
+    required: true
+  cert_name:
+    description: '证书名称'
+    required: true
+runs:
+  using: 'node12'
+  main: 'dist/index.js'
