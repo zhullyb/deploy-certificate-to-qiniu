@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Deploy SSL Certificate to Qiniu
-        uses: zhullyb/deploy-certificate-to-qiniu@main
+        uses: zhullyb/deploy-certificate-to-qiniu@release
         with:
           access_key: ${{ secrets.QINIU_AK }}
           secret_key: ${{ secrets.QINIU_SK }}
@@ -40,7 +40,7 @@ jobs:
           key: ${{ secrets.SSL_KEY }}
           cert_name: my-cert-name
           cert_domain: your-domain.com
-          deploy_to_cdn: 'true'
+          deploy_to_cdn: "true"
 ```
 
 ### 本地测试
@@ -65,15 +65,15 @@ pnpm run test -- \
 
 ## 参数说明
 
-| 参数 | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `access_key` | 是 | - | 七牛云 Access Key |
-| `secret_key` | 是 | - | 七牛云 Secret Key |
-| `cert` | 是 | - | SSL 证书内容（PEM 格式）或文件路径 |
-| `key` | 是 | - | SSL 证书私钥内容（PEM 格式）或文件路径 |
-| `cert_name` | 是 | - | 证书名称（用于七牛云证书管理） |
-| `cert_domain` | 条件 | - | CDN 域名，`deploy_to_cdn` 为 `true` 时必填 |
-| `deploy_to_cdn` | 否 | `true` | 是否自动部署证书到 CDN，设置为 `false` 可跳过 CDN 部署 |
+| 参数            | 必填 | 默认值 | 说明                                                   |
+| --------------- | ---- | ------ | ------------------------------------------------------ |
+| `access_key`    | 是   | -      | 七牛云 Access Key                                      |
+| `secret_key`    | 是   | -      | 七牛云 Secret Key                                      |
+| `cert`          | 是   | -      | SSL 证书内容（PEM 格式）或文件路径                     |
+| `key`           | 是   | -      | SSL 证书私钥内容（PEM 格式）或文件路径                 |
+| `cert_name`     | 是   | -      | 证书名称（用于七牛云证书管理）                         |
+| `cert_domain`   | 条件 | -      | CDN 域名，`deploy_to_cdn` 为 `true` 时必填             |
+| `deploy_to_cdn` | 否   | `true` | 是否自动部署证书到 CDN，设置为 `false` 可跳过 CDN 部署 |
 
 ## GitHub Secrets 配置
 
@@ -90,6 +90,15 @@ pnpm run test -- \
 2. **获取证书 ID**: 从上传响应中获取证书 ID
 3. **部署到 CDN**: （可选）使用证书 ID 更新指定 CDN 域名的 HTTPS 配置
 4. **验证部署**: 检查更新后的配置是否正确
+
+## 发布流程
+
+主分支仅保留 TypeScript 源码，构建后的 `dist` 会由发布流程写入 `release` 分支并为最新提交打标签。需要发布新版本时：
+
+1. 打开仓库的 **Actions**，选择 **Release Action Package** 工作流并点击 **Run workflow**。
+2. 填写要发布的版本号（建议格式为 `vX.Y.Z`，例如 `v1.2.3`），可选开启 `generate_changelog` 让 GitHub 自动生成 Release Note。
+3. 工作流会构建项目、将产物推送到 `release` 分支，并创建同名 Git 标签。
+4. 在 workflow 成功后，即可在使用方的仓库内引用新版本，例如 `uses: zhullyb/deploy-certificate-to-qiniu@v1.2.3`。
 
 ## 开发
 

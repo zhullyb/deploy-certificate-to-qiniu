@@ -1,0 +1,101 @@
+name: Release Action Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag name for this release (for example: v1.2.3)"
+        required: true
+      generate_changelog:
+        description: "Set to true to generate a GitHub release with notes"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build action bundle
+        run: npm run build
+
+      - name: Publish to release branch
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_BRANCH: release
+          GENERATE_CHANGELOG: ${{ inputs.generate_changelog }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$VERSION" ]]; then
+            echo "Version input is required" >&2
+            exit 1
+          fi
+
+          git config user.name "zhullyb"
+          git config user.email "zhullyb@outlook.com"
+
+          git fetch origin --tags --prune
+
+          if git rev-parse "$VERSION" >/dev/null 2>&1 || git ls-remote --exit-code --tags origin "$VERSION" >/dev/null 2>&1; then
+            echo "Tag $VERSION already exists. Choose a new version." >&2
+            exit 1
+          fi
+
+          git checkout -B "$RELEASE_BRANCH" "$GITHUB_SHA"
+
+          if [[ ! -d dist ]]; then
+            echo "dist directory missing. Release aborted." >&2
+            exit 1
+          fi
+
+          if [[ ! -f action.yml ]]; then
+            echo "action.yml missing. Release aborted." >&2
+            exit 1
+          fi
+
+          shopt -s dotglob
+          for path in *; do
+            case "$path" in
+              dist|action.yml|.git)
+                continue
+                ;;
+            esac
+            rm -rf "$path"
+          done
+          shopt -u dotglob
+
+          git add -f dist
+          git add action.yml
+          git add -u
+
+          if git diff --cached --quiet; then
+            echo "No build output detected. Release aborted." >&2
+            exit 1
+          fi
+
+          git commit -m "chore: release $VERSION"
+          git tag "$VERSION"
+
+          git push origin HEAD:"refs/heads/$RELEASE_BRANCH" --force-with-lease
+          git push origin "$VERSION"
+
+          if [[ "$GENERATE_CHANGELOG" == "true" ]]; then
+            gh release create "$VERSION" --generate-notes --target "$RELEASE_BRANCH"
+          fi
